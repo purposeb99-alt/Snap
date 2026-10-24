@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#080a12">
+<title>INFINITY SNAP</title>
+<style>
+:root{color-scheme:dark;--cyan:#59f4ff;--violet:#a78bfa;--bg:#080a12}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% 0%,#17213b 0,#080a12 60%);color:#f5f7ff;font:15px system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
+main{max-width:760px;margin:auto;padding:22px 16px 32px}
+header{text-align:center;padding:12px 0 20px} .eyebrow{font-size:11px;letter-spacing:.28em;color:var(--cyan);font-weight:800}
+h1{font-size:clamp(28px,7vw,48px);letter-spacing:.09em;margin:7px 0;background:linear-gradient(90deg,#fff,var(--cyan),var(--violet));color:transparent;background-clip:text}
+.sub{color:#9ba8c4;margin:0}
+.frame{position:relative;overflow:hidden;border:1px solid #293650;border-radius:22px;background:#05070d;aspect-ratio:4/3;box-shadow:0 0 32px #59f4ff12}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+canvas{pointer-events:none;transform:none}
+.overlay{position:absolute;left:12px;top:12px;border:1px solid #59f4ff66;border-radius:99px;padding:7px 10px;background:#07111bcc;font-size:11px;letter-spacing:.08em;color:var(--cyan)}
+.center{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:22px;color:#c3cbe0;background:#080a1280}
+.center.hidden{display:none}.center strong{display:block;color:white;font-size:18px;margin-bottom:7px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+button{font:700 14px system-ui;border:1px solid #34415e;border-radius:14px;padding:14px 12px;color:#f5f7ff;background:#131a2a;cursor:pointer;min-height:48px}
+button.primary{color:#061015;background:linear-gradient(110deg,var(--cyan),#a5faff);border:0}
+button:disabled{opacity:.5}
+.status{border:1px solid #25304a;background:#0d1220;border-radius:14px;padding:12px 14px;margin-top:12px;color:#b9c4dd;line-height:1.45}
+.status b{color:var(--cyan)}.settings{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:12px 14px;border:1px solid #25304a;border-radius:14px;background:#0d1220}
+input[type=range]{width:45%;accent-color:var(--cyan)}.hint{font-size:12px;color:#8d9ab5;line-height:1.6;margin:16px 2px}
+footer{text-align:center;color:#687592;font-size:11px;letter-spacing:.12em;margin-top:22px}
+@media(max-width:420px){main{padding:15px 12px}.controls{gap:8px}button{padding:12px 8px;font-size:13px}}
+</style>
+</head>
+<body>
+<main>
+<header><div class="eyebrow">REALITY • REIMAGINED</div><h1>INFINITY SNAP</h1><p class="sub">Snap your fingers. Bend the moment.</p></header>
+<section class="frame" id="frame">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="fx"></canvas>
+  <div class="overlay" id="badge">● CAMERA OFF</div>
+  <div class="center" id="welcome"><div><strong>Your moment awaits</strong>Allow camera and microphone to begin.<br>Use the button if snap detection misses.</div></div>
+</section>
+<div class="controls">
+<button class="primary" id="start">▶ Start camera</button>
+<button id="snap" disabled>✦ Trigger effect</button>
+<button id="listen" disabled>♫ Enable snap detection</button>
+<button id="reset">↻ Reset effect</button>
+</div>
+<div class="status" id="status" aria-live="polite"><b>Status:</b> Ready. Tap Start camera.</div>
+<div class="settings"><label for="sensitivity">Snap sensitivity</label><input id="sensitivity" type="range" min="1" max="10" value="6"><span id="sensVal">6/10</span></div>
+<p class="hint">Privacy: video and audio are processed on this device; nothing is uploaded by this page. Snap detection is a simple sound-level heuristic and may also react to claps or other sharp sounds. For best results, use a quiet room and keep the phone steady.</p>
+<footer>INFINITY SNAP • EXPERIMENTAL CAMERA EFFECT</footer>
+</main>
+<script>
+const video=document.querySelector('#video'), canvas=document.querySelector('#fx'), ctx=canvas.getContext('2d');
+const startBtn=document.querySelector('#start'), snapBtn=document.querySelector('#snap'), listenBtn=document.querySelector('#listen');
+const statusEl=document.querySelector('#status'), badge=document.querySelector('#badge'), welcome=document.querySelector('#welcome');
+const sens=document.querySelector('#sensitivity'), sensVal=document.querySelector('#sensVal');
+let stream=null,audioCtx=null,analyser=null,micStream=null,raf=0,lastTrigger=0,particles=[],dissolve=0,restore=0;
+function status(msg){statusEl.innerHTML='<b>Status:</b> '+msg}
+function resize(){const r=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(r.width*dpr);canvas.height=Math.round(r.height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}
+new ResizeObserver(resize).observe(canvas);resize();
+sens.addEventListener('input',()=>sensVal.textContent=sens.value+'/10');
+startBtn.onclick=async()=>{
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:true});
+  video.srcObject=stream; await video.play(); welcome.classList.add('hidden');
+  startBtn.disabled=true;snapBtn.disabled=false;listenBtn.disabled=false;badge.textContent='● CAMERA LIVE';
+  status('Camera is live. Tap Trigger effect or enable snap detection.');
+ }catch(e){status('Could not access camera/microphone. Open this page on HTTPS and allow both permissions. ('+e.message+')')}
+};
+function trigger(){
+ if(!stream)return;const now=performance.now();if(now-lastTrigger<1500)return;lastTrigger=now;
+ const w=canvas.clientWidth,h=canvas.clientHeight;particles=[];
+ const count=Math.min(1400,Math.floor(w*h/3));
+ for(let i=0;i<count;i++){particles.push({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*8,vy:(Math.random()-.5)*8-1,life:30+Math.random()*55,size:.7+Math.random()*2.6,hue:175+Math.random()*100})}
+ dissolve=1;restore=0;status('SNAP DETECTED — reality fragmenting…');setTimeout(()=>{if(stream)status('Effect complete. Ready for another snap.')},1900);
+}
+snapBtn.onclick=trigger;
+document.querySelector('#reset').onclick=()=>{particles=[];dissolve=0;restore=0;ctx.clearRect(0,0,canvas.width,canvas.height);status(stream?'Ready. Tap Trigger effect or listen for a snap.':'Ready. Tap Start camera.')};
+listenBtn.onclick=async()=>{
+ try{
+  if(analyser){cancelAnimationFrame(raf);audioCtx.close();audioCtx=null;analyser=null;if(micStream)micStream.getTracks().forEach(t=>t.stop());micStream=null;listenBtn.textContent='♫ Enable snap detection';status('Snap detection paused.');return}
+  micStream=stream;audioCtx=new (window.AudioContext||window.webkitAudioContext)();await audioCtx.resume();
+  const source=audioCtx.createMediaStreamSource(micStream);analyser=audioCtx.createAnalyser();analyser.fftSize=1024;source.connect(analyser);
+  const data=new Uint8Array(analyser.fftSize);let previous=0;
+  listenBtn.textContent='♫ Disable snap detection';status('Listening for sharp sounds…');
+  const loop=()=>{if(!analyser)return;analyser.getByteTimeDomainData(data);let sum=0;for(let i=0;i<data.length;i++){let v=(data[i]-128)/128;sum+=v*v}let rms=Math.sqrt(sum/data.length);let threshold=.16+(10-Number(sens.value))*.012;if(rms>threshold&&previous<threshold*.55&&performance.now()-lastTrigger>1800)trigger();previous=rms;raf=requestAnimationFrame(loop)};loop();
+ }catch(e){status('Microphone detection failed: '+e.message)}
+};
+function draw(){
+ const w=canvas.clientWidth,h=canvas.clientHeight;ctx.clearRect(0,0,w,h);
+ if(particles.length){ctx.save();ctx.globalCompositeOperation='lighter';for(const p of particles){p.x+=p.vx;p.y+=p.vy;p.vx*=.985;p.vy*=.985;p.life--;ctx.globalAlpha=Math.max(0,Math.min(1,p.life/22));ctx.fillStyle=`hsl(${p.hue} 100% 68%)`;ctx.shadowBlur=8;ctx.shadowColor=ctx.fillStyle;ctx.fillRect(p.x,p.y,p.size,p.size)}ctx.restore();particles=particles.filter(p=>p.life>0&&p.x>-20&&p.x<w+20&&p.y>-20&&p.y<h+20)}
+ requestAnimationFrame(draw)
+}draw();
+window.addEventListener('pagehide',()=>{if(stream)stream.getTracks().forEach(t=>t.stop());if(audioCtx)audioCtx.close()});
+</script>
+</body></html>
